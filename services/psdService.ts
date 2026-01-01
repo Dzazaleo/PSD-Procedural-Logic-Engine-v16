@@ -338,12 +338,20 @@ export const getCleanLayerTree = (layers: Layer[], path: string = ''): Serializa
     const width = right - left;
     const height = bottom - top;
     
+    // STRICT OPACITY MAPPING:
+    // ag-psd provides 0-255. We convert to 0.0-1.0 float.
+    // Default to 1.0 (fully opaque) if undefined.
+    // We clamp to 0-1 range to ensure float safety.
+    const normalizedOpacity = typeof child.opacity === 'number'
+        ? Math.max(0, Math.min(1, child.opacity / 255))
+        : 1;
+
     const node: SerializableLayer = {
       id: currentPath,
       name: child.name || `Layer ${index}`,
       type: child.children ? 'group' : 'layer',
       isVisible: !child.hidden,
-      opacity: (child.opacity ?? 255) / 255, // ag-psd 0-255 -> 0-1
+      opacity: normalizedOpacity, 
       coords: {
         x: left,
         y: top,
