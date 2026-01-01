@@ -396,8 +396,8 @@ export const findLayerByPath = (psd: Psd, pathId: string): Layer | null => {
 
 /**
  * Composites a visual representation of the TransformedPayload using the original PSD binary data.
- * Uses a robust Recursive Painter's Algorithm in a "Clean Room" canvas environment to 
- * correctly handle nested groups, alpha blending, and strict coordinate mapping.
+ * Uses a robust Recursive Painter's Algorithm in a "Clean Room" canvas environment.
+ * Includes EXHAUSTIVE DIAGNOSTIC LOGGING to debug faint rendering issues.
  * 
  * @param payload The transformed geometry and logic instructions.
  * @param psd The original binary source providing pixel data.
@@ -425,12 +425,12 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
     // 3. Absolute Clear (Transparent)
     ctx.clearRect(0, 0, w, h);
 
-    // 4. Background Fill (Strict Layer 0)
-    // We fill a solid neutral background FIRST to ensure faint/semi-transparent layers 
-    // have a contrast surface to render against, matching the UI theme.
-    // This prevents "ghosting" or faintness caused by drawing onto pure alpha.
-    ctx.fillStyle = '#0f172a'; // Slate 900
+    // 4. Background Fill (DEBUG MODE: Solid White)
+    // Using white instead of dark slate to clearly visualize any faint alpha layers.
+    ctx.fillStyle = '#ffffff'; 
     ctx.fillRect(0, 0, w, h);
+
+    console.log(`[COMPOSITOR] Starting render for ${payload.layers.length} root layers. Target: ${w}x${h}`);
 
     // Optional: Pre-load the generative preview if available to use as texture
     let genImage: HTMLImageElement | null = null;
@@ -447,23 +447,37 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
         }
     }
 
-    const drawLayers = async (layers: TransformedLayer[]) => {
+    const drawLayers = async (layers: TransformedLayer[], depth = 0) => {
         // Iterate in Reverse Order (Length-1 to 0) to maintain Painter's Algorithm.
         // In ag-psd/Photoshop structure, index 0 is typically the Top-Most layer.
         // Therefore, we must draw the Bottom-Most (last index) first.
         for (let i = layers.length - 1; i >= 0; i--) {
             const layer = layers[i];
             
+            // DIAGNOSTIC FORCE OPACITY
+            // If opacity is missing or 0, force to 1.0 to rule out data errors for this diagnostic run.
+            let effectiveOpacity = (typeof layer.opacity === 'number') ? layer.opacity : 1.0;
+            if (effectiveOpacity === 0) {
+                 effectiveOpacity = 1.0; 
+                 console.warn(`[COMPOSITOR] Layer ${layer.name} had 0 opacity. Forcing to 1.0 for debug.`);
+            }
+
+            console.log(`[LAYER] Depth:${depth} | Name: "${layer.name}" | Type: ${layer.type} | Opacity: ${effectiveOpacity.toFixed(2)} | Visible: ${layer.isVisible}`);
+
             // Visibility Check
-            if (!layer.isVisible) continue;
+            if (!layer.isVisible) {
+                console.log(`[LAYER] Skipping invisible layer: ${layer.name}`);
+                continue;
+            }
 
             // --- RECURSIVE GROUP HANDLING ---
-            // CRITICAL: Groups should NOT apply their opacity to the global context if the children 
-            // already carry their final computed opacity. This prevents "double-dipping" alpha which causes faint colors.
-            // We blindly trust the TransformedPayload children to have correct absolute opacity.
             if (layer.type === 'group' && layer.children) {
-                // Just recurse. Do not save/restore context or set globalAlpha for the group container.
-                await drawLayers(layer.children);
+                // RECURSION GUARD:
+                // We STRICTLY wrap the recursive call in save/restore to prevent any state bleeding.
+                // We do NOT apply the group's opacity here, assuming children carry absolute opacity.
+                ctx.save();
+                await drawLayers(layer.children, depth + 1);
+                ctx.restore();
                 continue;
             } 
             
@@ -476,19 +490,14 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
 
             // 2. STRICT ALPHA APPLICATION
             // Ensure alpha is 0.0-1.0. Do NOT scale by 255 here, as the model uses normalized floats.
-            const alpha = Math.max(0, Math.min(1, layer.opacity));
+            const alpha = Math.max(0, Math.min(1, effectiveOpacity));
             ctx.globalAlpha = alpha;
 
-            // 3. DIAGNOSTIC LOGGING
-            if (['BG', 'TEXT', 'Background', 'Layer'].some(k => layer.name.includes(k)) && alpha < 1) {
-                // Uncomment for detailed debugging if needed
-                // console.log(`[Compositor] Drawing ${layer.name} | Alpha: ${alpha}`);
-            }
+            const { x, y, w: dw, h: dh } = layer.coords;
+            console.log(`[DRAW] "${layer.name}" at x:${Math.round(x)}, y:${Math.round(y)} (${Math.round(dw)}x${Math.round(dh)})`);
 
-            // 4. DRAW
+            // 3. DRAW
             if (layer.type === 'generative') {
-                const { x, y, w: dw, h: dh } = layer.coords;
-                
                 if (genImage && payload.previewUrl) {
                     try {
                         ctx.drawImage(genImage, x, y, dw, dh);
@@ -503,8 +512,6 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
                 const sourceLayer = findLayerByPath(psd, layer.id);
 
                 if (sourceLayer && sourceLayer.canvas) {
-                    const { x, y, w: dw, h: dh } = layer.coords;
-
                     if (layer.transform && layer.transform.rotation) {
                         const rot = (layer.transform.rotation * Math.PI) / 180;
                         const cx = x + dw / 2;
@@ -517,6 +524,8 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
                         // Direct Draw (Standard)
                         ctx.drawImage(sourceLayer.canvas, x, y, dw, dh);
                     }
+                } else {
+                    console.warn(`[COMPOSITOR] Source canvas missing for layer: ${layer.name} (ID: ${layer.id})`);
                 }
             }
 
