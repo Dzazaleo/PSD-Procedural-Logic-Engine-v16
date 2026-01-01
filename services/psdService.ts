@@ -396,7 +396,8 @@ export const findLayerByPath = (psd: Psd, pathId: string): Layer | null => {
 
 /**
  * Composites a visual representation of the TransformedPayload using the original PSD binary data.
- * Uses a robust Recursive Painter's Algorithm to correctly handle nested groups and alpha blending.
+ * Uses a robust Recursive Painter's Algorithm in a "Clean Room" canvas environment to 
+ * correctly handle nested groups, alpha blending, and strict coordinate mapping.
  * 
  * @param payload The transformed geometry and logic instructions.
  * @param psd The original binary source providing pixel data.
@@ -412,10 +413,23 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    // Fill background (Dark slate to help AI see boundaries, matches UI aesthetics)
-    // Clear the canvas completely first to prevent ghosting
+    // --- CLEAN ROOM SETUP ---
+    // 1. Enforce High Fidelity Smoothing
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    
+    // 2. Reset Composition Logic
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1.0;
+
+    // 3. Absolute Clear (Transparent)
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0f172a';
+
+    // 4. Background Fill (Strict Layer 0)
+    // We fill a solid neutral background FIRST to ensure faint/semi-transparent layers 
+    // have a contrast surface to render against, matching the UI theme.
+    // This prevents "ghosting" or faintness caused by drawing onto pure alpha.
+    ctx.fillStyle = '#0f172a'; // Slate 900
     ctx.fillRect(0, 0, w, h);
 
     // Optional: Pre-load the generative preview if available to use as texture
@@ -454,56 +468,53 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
             } 
             
             // --- LEAF LAYER HANDLING (Pixel / Generative) ---
-            // Only apply opacity at the leaf level.
+            // WRAP EVERY DRAW CALL IN SAVE/RESTORE FOR SANITATION
             ctx.save();
             
-            // STRICT OPACITY CLAMP:
-            // Ensure alpha is 0.0-1.0. Do NOT scale by 255 here, as the model uses normalized floats.
-            ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
+            // 1. Reset Composite Mode per layer to prevent leaks
+            ctx.globalCompositeOperation = 'source-over';
 
-            // 2. GENERATIVE LAYER (AI/Proxy)
+            // 2. STRICT ALPHA APPLICATION
+            // Ensure alpha is 0.0-1.0. Do NOT scale by 255 here, as the model uses normalized floats.
+            const alpha = Math.max(0, Math.min(1, layer.opacity));
+            ctx.globalAlpha = alpha;
+
+            // 3. DIAGNOSTIC LOGGING
+            if (['BG', 'TEXT', 'Background', 'Layer'].some(k => layer.name.includes(k)) && alpha < 1) {
+                // Uncomment for detailed debugging if needed
+                // console.log(`[Compositor] Drawing ${layer.name} | Alpha: ${alpha}`);
+            }
+
+            // 4. DRAW
             if (layer.type === 'generative') {
                 const { x, y, w: dw, h: dh } = layer.coords;
                 
                 if (genImage && payload.previewUrl) {
-                    // If we have a generated preview, map it to the generative layer slot
-                    // This acts as a 'texture' for the placeholder
                     try {
                         ctx.drawImage(genImage, x, y, dw, dh);
                     } catch (e) {
-                        // Fallback if draw fails
                         drawGenerativePlaceholder(ctx, x, y, dw, dh);
                     }
                 } else {
                     drawGenerativePlaceholder(ctx, x, y, dw, dh);
                 }
             } 
-            
-            // 3. STANDARD PIXEL LAYER (Binary Source)
             else {
                 const sourceLayer = findLayerByPath(psd, layer.id);
 
-                // Critical Rule: Graceful skip if binary canvas is missing (common for adjustment layers)
                 if (sourceLayer && sourceLayer.canvas) {
                     const { x, y, w: dw, h: dh } = layer.coords;
 
-                    // Rotation Logic: Use Canvas Transform instead of temp canvas
                     if (layer.transform && layer.transform.rotation) {
                         const rot = (layer.transform.rotation * Math.PI) / 180;
-                        
-                        // Translate to center of target rect
                         const cx = x + dw / 2;
                         const cy = y + dh / 2;
                         
                         ctx.translate(cx, cy);
                         ctx.rotate(rot);
-                        
-                        // Draw centered at origin (relative to translation)
-                        // Note: dw, dh are the scaled dimensions
                         ctx.drawImage(sourceLayer.canvas, -dw / 2, -dh / 2, dw, dh);
                     } else {
                         // Direct Draw (Standard)
-                        // ABSOLUTE MAPPING: coords.x/y are the final destination on the canvas
                         ctx.drawImage(sourceLayer.canvas, x, y, dw, dh);
                     }
                 }
