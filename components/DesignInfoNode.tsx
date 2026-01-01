@@ -60,8 +60,8 @@ const LayerItem: React.FC<LayerItemProps> = ({ node, depth = 0 }) => {
 
       {isOpen && hasChildren && (
         <div className="border-l border-slate-700 ml-[15px]">
-          {/* REVERSED: Render top-most children first */}
-          {[...node.children!].reverse().map((child) => (
+          {/* STANDARD: Render Top-to-Bottom (Index 0 first) */}
+          {node.children!.map((child) => (
             <LayerItem key={child.id} node={child} depth={depth + 1} />
           ))}
         </div>
@@ -119,8 +119,8 @@ export const DesignInfoNode = memo(({ id }: NodeProps) => {
           </div>
         ) : (
           <div className="py-1">
-             {/* REVERSED: Render top-most layers first (Photoshop Style) */}
-             {[...designLayers].reverse().map(layer => (
+             {/* STANDARD: Render Top-to-Bottom (Index 0 first) */}
+             {designLayers.map(layer => (
                <LayerItem key={layer.id} node={layer} />
              ))}
           </div>

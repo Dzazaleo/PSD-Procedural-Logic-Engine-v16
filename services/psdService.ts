@@ -477,6 +477,7 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
                 // RECURSION GUARD:
                 // We STRICTLY wrap the recursive call in save/restore to prevent any state bleeding.
                 // We do NOT apply the group's opacity here, assuming children carry absolute opacity.
+                // Note: Children are passed to drawLayers which will also iterate in reverse.
                 ctx.save();
                 await drawLayers(layer.children, depth + 1);
                 ctx.restore();
