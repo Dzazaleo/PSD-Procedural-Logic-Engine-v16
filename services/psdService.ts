@@ -455,6 +455,11 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
         // Therefore, we must draw the Bottom-Most (last index) first.
         for (let i = layers.length - 1; i >= 0; i--) {
             const layer = layers[i];
+
+            // Diagnostic Check (Requested)
+            if (i === layers.length - 1) {
+                 console.log(`[COMPOSITOR] Starting with Background-most layer: ${layer.name}`);
+            }
             
             // DIAGNOSTIC FORCE OPACITY
             // If opacity is missing or 0, force to 1.0 to rule out data errors for this diagnostic run.

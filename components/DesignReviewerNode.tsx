@@ -37,9 +37,11 @@ const renderCurrentState = async (payload: TransformedPayload, psd: Psd): Promis
             
             if (!layer.isVisible) continue;
 
-            // Group Handling: Recurse immediately
+            // Group Handling: Recurse immediately with state isolation
             if (layer.type === 'group' && layer.children) {
+                ctx.save();
                 drawLayers(layer.children);
+                ctx.restore();
                 continue;
             }
 
@@ -47,7 +49,8 @@ const renderCurrentState = async (payload: TransformedPayload, psd: Psd): Promis
             ctx.save();
             
             // Apply Opacity
-            ctx.globalAlpha = layer.opacity;
+            const alpha = Math.max(0, Math.min(1, layer.opacity));
+            ctx.globalAlpha = alpha;
 
             // 1. Generative Placeholder
             if (layer.type === 'generative') {
@@ -62,13 +65,30 @@ const renderCurrentState = async (payload: TransformedPayload, psd: Psd): Promis
                 const originalLayer = findLayerByPath(psd, layer.id);
                 if (originalLayer && originalLayer.canvas) {
                     try {
-                        ctx.drawImage(
-                            originalLayer.canvas, 
-                            layer.coords.x, 
-                            layer.coords.y, 
-                            layer.coords.w, 
-                            layer.coords.h
-                        );
+                        // Handle transform (Rotation/Pivot) logic to match service
+                        if (layer.transform && layer.transform.rotation) {
+                            const rot = (layer.transform.rotation * Math.PI) / 180;
+                            const cx = layer.coords.x + layer.coords.w / 2;
+                            const cy = layer.coords.y + layer.coords.h / 2;
+                            
+                            ctx.translate(cx, cy);
+                            ctx.rotate(rot);
+                            ctx.drawImage(
+                                originalLayer.canvas, 
+                                -layer.coords.w / 2, 
+                                -layer.coords.h / 2, 
+                                layer.coords.w, 
+                                layer.coords.h
+                            );
+                        } else {
+                            ctx.drawImage(
+                                originalLayer.canvas, 
+                                layer.coords.x, 
+                                layer.coords.y, 
+                                layer.coords.w, 
+                                layer.coords.h
+                            );
+                        }
                     } catch (e) {
                         console.warn("Failed to draw layer:", layer.name);
                     }
