@@ -29,47 +29,53 @@ const renderCurrentState = async (payload: TransformedPayload, psd: Psd): Promis
     ctx.fillRect(0, 0, w, h);
 
     const drawLayers = (layers: TransformedLayer[]) => {
-        // Reverse painter's algorithm (bottom-up)
+        // Reverse Painter's Algorithm:
+        // Index 0 = Top, Index Length-1 = Bottom.
+        // We draw Bottom-up (Reverse Loop).
         for (let i = layers.length - 1; i >= 0; i--) {
             const layer = layers[i];
             
-            if (layer.isVisible) {
-                // 1. Draw Image Content (if standard layer)
-                if (layer.type !== 'generative' && layer.type !== 'group') {
-                    const originalLayer = findLayerByPath(psd, layer.id);
-                    if (originalLayer && originalLayer.canvas) {
-                        try {
-                            // Draw at transformed coordinates
-                            ctx.globalAlpha = layer.opacity;
-                            ctx.drawImage(
-                                originalLayer.canvas, 
-                                layer.coords.x, 
-                                layer.coords.y, 
-                                layer.coords.w, 
-                                layer.coords.h
-                            );
-                        } catch (e) {
-                            console.warn("Failed to draw layer:", layer.name);
-                        }
+            if (!layer.isVisible) continue;
+
+            // Group Handling: Recurse immediately
+            if (layer.type === 'group' && layer.children) {
+                drawLayers(layer.children);
+                continue;
+            }
+
+            // Leaf Handling
+            ctx.save();
+            
+            // Apply Opacity
+            ctx.globalAlpha = layer.opacity;
+
+            // 1. Generative Placeholder
+            if (layer.type === 'generative') {
+                ctx.fillStyle = 'rgba(192, 132, 252, 0.3)'; // Purple tint
+                ctx.strokeStyle = 'rgba(192, 132, 252, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.fillRect(layer.coords.x, layer.coords.y, layer.coords.w, layer.coords.h);
+                ctx.strokeRect(layer.coords.x, layer.coords.y, layer.coords.w, layer.coords.h);
+            }
+            // 2. Standard Image Layer
+            else {
+                const originalLayer = findLayerByPath(psd, layer.id);
+                if (originalLayer && originalLayer.canvas) {
+                    try {
+                        ctx.drawImage(
+                            originalLayer.canvas, 
+                            layer.coords.x, 
+                            layer.coords.y, 
+                            layer.coords.w, 
+                            layer.coords.h
+                        );
+                    } catch (e) {
+                        console.warn("Failed to draw layer:", layer.name);
                     }
                 }
-                
-                // 2. Draw Generative Placeholder (if gen layer)
-                if (layer.type === 'generative') {
-                    ctx.fillStyle = 'rgba(192, 132, 252, 0.3)'; // Purple tint
-                    ctx.strokeStyle = 'rgba(192, 132, 252, 0.8)';
-                    ctx.lineWidth = 2;
-                    ctx.fillRect(layer.coords.x, layer.coords.y, layer.coords.w, layer.coords.h);
-                    ctx.strokeRect(layer.coords.x, layer.coords.y, layer.coords.w, layer.coords.h);
-                }
-
-                ctx.globalAlpha = 1.0;
-
-                // Recursion
-                if (layer.children) {
-                    drawLayers(layer.children);
-                }
             }
+
+            ctx.restore();
         }
     };
 
