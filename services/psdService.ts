@@ -338,11 +338,17 @@ export const getCleanLayerTree = (layers: Layer[], path: string = ''): Serializa
     const width = right - left;
     const height = bottom - top;
     
-    // STRICT OPACITY MAPPING:
-    // ag-psd provides 0-255. We convert to 0.0-1.0 float.
-    // If child.opacity is undefined, it defaults to 255 (fully opaque).
-    // This fixes the issue where missing opacity was treated incorrectly or resulting in 0.
-    const normalizedOpacity = (child.opacity ?? 255) / 255;
+    // SAFETY FLOOR OPACITY MAPPING:
+    // ag-psd provides 0-255. Some files report 0 or 1 for 100%.
+    // We implement a safety floor where <= 1 is treated as 100% (1.0).
+    const rawOpacity = child.opacity ?? 255;
+    let normalizedOpacity = rawOpacity <= 1 ? 1.0 : rawOpacity / 255;
+
+    // Clamp to ensure float safety
+    normalizedOpacity = Math.max(0, Math.min(1, normalizedOpacity));
+
+    // DIAGNOSTIC LOG (as requested)
+    console.log(`[PARSER] Layer: ${child.name} | Raw Opacity: ${child.opacity} | Mapped: ${normalizedOpacity.toFixed(2)}`);
 
     const node: SerializableLayer = {
       id: currentPath,
@@ -399,7 +405,7 @@ export const findLayerByPath = (psd: Psd, pathId: string): Layer | null => {
  * 
  * @param payload The transformed geometry and logic instructions.
  * @param psd The original binary source providing pixel data.
- * @returns A Promise resolving to a high-quality Data URL (image/jpeg).
+ * @returns A Promise resolving to a high-quality Data URL (image/png).
  */
 export const compositePayloadToCanvas = async (payload: TransformedPayload, psd: Psd): Promise<string | null> => {
     if (!payload || !psd) return null;
@@ -423,10 +429,8 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
     // 3. Absolute Clear (Transparent)
     ctx.clearRect(0, 0, w, h);
 
-    // 4. Background Fill (DEBUG MODE: Solid White)
-    // Using white instead of dark slate to clearly visualize any faint alpha layers.
-    ctx.fillStyle = '#ffffff'; 
-    ctx.fillRect(0, 0, w, h);
+    // 4. Background Fill REMOVED for Transparency Support
+    // We want to see the checkerboard in the preview node, not a solid background.
 
     console.log(`[COMPOSITOR] Starting render for ${payload.layers.length} root layers. Target: ${w}x${h}`);
 
@@ -533,7 +537,8 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
 
     await drawLayers(payload.layers);
 
-    return canvas.toDataURL('image/jpeg', 0.9);
+    // CRITICAL: Export as PNG to preserve transparency (JPEG forces black/white background)
+    return canvas.toDataURL('image/png');
 };
 
 // Helper for drawing consistent AI placeholders

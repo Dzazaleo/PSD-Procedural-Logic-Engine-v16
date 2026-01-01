@@ -225,7 +225,7 @@ export const ContainerPreviewNode = memo(({ id, data }: NodeProps<PSDNodeData>) 
               <img 
                 src={previewUrl} 
                 alt="Container Preview" 
-                className="w-full h-full object-contain relative z-10 drop-shadow-2xl"
+                className="w-full h-full object-contain relative z-10"
               />
           )}
 
