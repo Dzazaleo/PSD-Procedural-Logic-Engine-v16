@@ -456,7 +456,10 @@ export const compositePayloadToCanvas = async (payload: TransformedPayload, psd:
             // --- LEAF LAYER HANDLING (Pixel / Generative) ---
             // Only apply opacity at the leaf level.
             ctx.save();
-            ctx.globalAlpha = layer.opacity;
+            
+            // STRICT OPACITY CLAMP:
+            // Ensure alpha is 0.0-1.0. Do NOT scale by 255 here, as the model uses normalized floats.
+            ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
 
             // 2. GENERATIVE LAYER (AI/Proxy)
             if (layer.type === 'generative') {
